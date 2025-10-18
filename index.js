@@ -1,10 +1,33 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
+const fs = require('fs');
+const path = require('path');
 
 // Crear instancia del bot con tu token
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
 
 console.log('🚀 Bot de Telegram iniciado...');
+
+// Colección de comandos
+const commands = new Map();
+
+// Cargar comandos desde la carpeta commands/
+const commandsPath = path.join(__dirname, 'commands');
+if (fs.existsSync(commandsPath)) {
+    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+    for (const file of commandFiles) {
+        const filePath = path.join(commandsPath, file);
+        const command = require(filePath);
+        
+        if ('command' in command && 'execute' in command) {
+            commands.set(command.command, command);
+            console.log(`✅ Comando cargado: ${command.command}`);
+        } else {
+            console.log(`⚠️ El comando en ${file} no tiene 'command' o 'execute'`);
+        }
+    }
+}
 
 // Evento cuando el bot se conecta correctamente
 bot.on('polling_error', (error) => {
@@ -21,6 +44,25 @@ bot.on('message', async (msg) => {
     const userId = msg.from.id;
     const userName = msg.from.first_name || msg.from.username || 'Usuario';
 
+    // === MANEJO DE COMANDOS ===
+    if (msg.text.startsWith('/')) {
+        const args = msg.text.split(/\s+/);
+        const commandName = args.shift();
+
+        const command = commands.get(commandName);
+
+        if (command) {
+            try {
+                await command.execute(bot, msg, args);
+            } catch (error) {
+                console.error(`Error ejecutando comando ${commandName}:`, error);
+                bot.sendMessage(chatId, '❌ Hubo un error al ejecutar ese comando.');
+            }
+            return; // Salir después de procesar el comando
+        }
+    }
+
+    // === DETECCIÓN Y REEMPLAZO DE ENLACES ===
     // Regex para detectar enlaces de Twitter/X
     const twitterRegex = /(https?:\/\/)(?:www\.)?(twitter\.com|x\.com)\/[^\s]+/gi;
     // Regex para detectar enlaces de Instagram
@@ -72,14 +114,18 @@ bot.on('message', async (msg) => {
     }
 });
 
-// Comando de ayuda opcional
+// Comando de ayuda
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, 
-        '👋 ¡Hola! Soy un bot que arregla enlaces de Twitter/X e Instagram.\n\n' +
-        '🔗 Twitter/X → fxtwitter.com\n' +
-        '📸 Instagram → kkinstagram.com\n\n' +
-        'Solo envía un enlace y yo me encargo del resto.'
+        '👋 ¡Hola! Soy un bot que arregla enlaces y busca palabras en japonés.\n\n' +
+        '🔗 *Funciones automáticas:*\n' +
+        '• Twitter/X → fxtwitter.com\n' +
+        '• Instagram → kkinstagram.com\n\n' +
+        '📚 *Comandos disponibles:*\n' +
+        '• /jisho <palabra> - Buscar en diccionario japonés\n\n' +
+        'Solo envía un enlace o usa un comando.',
+        { parse_mode: 'Markdown' }
     );
 });
 
